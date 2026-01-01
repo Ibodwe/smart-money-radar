@@ -37,6 +37,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(404)
+async def custom_404_handler(request: Request, exc):
+    return JSONResponse(
+        status_code=404,
+        content={"detail": f"Not Found: {request.url.path} (Handled by FastAPI)"},
+    )
+
 
 
 @app.get("/api")
