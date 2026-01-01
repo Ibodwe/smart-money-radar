@@ -1,6 +1,12 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+import sys
+import os
+
+# Add project root to sys.path to allow imports from api.services
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from api.services.stock_service import get_top_net_buy_sell, get_aggregated_top_stocks, analyze_special_trends
 import pandas as pd
 import io
