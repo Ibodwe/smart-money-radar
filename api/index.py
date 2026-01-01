@@ -39,7 +39,10 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "Stock API is running. Access /api for health check."}
+    return {
+        "status": "ok", 
+        "message": "Backend is running. If you see this at the root URL, the Frontend failed to load (static files not found). Check Vercel Build Logs."
+    }
 
 @app.get("/api")
 def health_check():
