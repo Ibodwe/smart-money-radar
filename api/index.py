@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from services.stock_service import get_top_net_buy_sell, get_aggregated_top_stocks, analyze_special_trends
+from api.services.stock_service import get_top_net_buy_sell, get_aggregated_top_stocks, analyze_special_trends
 import pandas as pd
 import io
 import zipfile
@@ -54,7 +54,7 @@ def get_analysis_trend(days: int, investor: str):
         raise HTTPException(status_code=400, detail="Invalid investor type")
     
     # Calculate date range (Trading Days)
-    from services.stock_service import get_start_date_n_trading_days_ago
+    from api.services.stock_service import get_start_date_n_trading_days_ago
     
     end_date = datetime.now()
     end_str = end_date.strftime("%Y%m%d")
