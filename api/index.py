@@ -37,12 +37,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+def read_root():
+    return {"status": "ok", "message": "Stock API is running. Access /api for health check."}
+
 @app.get("/api")
 def health_check():
     """Health check and startup error report"""
     if startup_error:
         return {"status": "error", "detail": startup_error}
     return {"status": "ok", "message": "Stock API is running"}
+
 
 @app.get("/api/analysis/advanced")
 def get_advanced_analysis(days: int, investor: str):
