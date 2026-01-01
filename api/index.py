@@ -47,6 +47,23 @@ async def custom_404_handler(request: Request, exc):
         content={"detail": f"Not Found: {request.url.path} (Handled by FastAPI)"},
     )
 
+@app.get("/")
+def read_root():
+    # Debug: List files in current directory to help diagnose path issues
+    files = []
+    # Walk top-down from current directory
+    for root, dirs, filenames in os.walk("."):
+        for filename in filenames:
+            files.append(os.path.join(root, filename))
+    
+    return {
+        "status": "debug", 
+        "message": "If you see this, static files are missing.",
+        "cwd": os.getcwd(),
+        "files_count": len(files),
+        "files": files[:200] # Limit output
+    }
+
 
 
 @app.get("/api")
