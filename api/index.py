@@ -3,21 +3,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import sys
 import os
-
-# Add project root to sys.path to allow imports from api.services
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-try:
-    from api.services.stock_service import get_top_net_buy_sell, get_aggregated_top_stocks, analyze_special_trends
-except ImportError:
-    from services.stock_service import get_top_net_buy_sell, get_aggregated_top_stocks, analyze_special_trends
-import pandas as pd
 import io
 import zipfile
+import pandas as pd
 from typing import Optional, List
 from datetime import datetime, timedelta
 
+# Initialize app FIRST to ensure it exists even if imports fail
 app = FastAPI()
+
+# Add project root to sys.path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Global variables for safe import
+stock_service = None
+startup_error = None
+
+try:
+    try:
+        from api.services import stock_service
+    except ImportError:
+        from services import stock_service
+except Exception as e:
+    startup_error = str(e)
+    print(f"Startup Error: {e}")
 
 # Allow CORS for React app
 app.add_middleware(
@@ -27,6 +36,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/api")
+def health_check():
+    """Health check and startup error report"""
+    if startup_error:
+        return {"status": "error", "detail": startup_error}
+    return {"status": "ok", "message": "Stock API is running"}
 
 @app.get("/api/analysis/advanced")
 def get_advanced_analysis(days: int, investor: str):
@@ -42,7 +58,10 @@ def get_advanced_analysis(days: int, investor: str):
     if investor not in investor_map:
         raise HTTPException(status_code=400, detail="Invalid investor type")
         
-    result = analyze_special_trends(days, investor_map[investor])
+    if startup_error:
+        raise HTTPException(status_code=500, detail=f"Server startup error: {startup_error}")
+        
+    result = stock_service.analyze_special_trends(days, investor_map[investor])
     if result is None:
         raise HTTPException(status_code=404, detail="No data found for this period")
         
@@ -63,16 +82,19 @@ def get_analysis_trend(days: int, investor: str):
         raise HTTPException(status_code=400, detail="Invalid investor type")
     
     # Calculate date range (Trading Days)
+    if startup_error:
+        raise HTTPException(status_code=500, detail=f"Server startup error: {startup_error}")
+
     try:
-        from api.services.stock_service import get_start_date_n_trading_days_ago
-    except ImportError:
-        from services.stock_service import get_start_date_n_trading_days_ago
+        start_str = stock_service.get_start_date_n_trading_days_ago(days)
+    except Exception as e:
+         # Fallback logic if needed or re-raise
+         start_str = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
     
     end_date = datetime.now()
     end_str = end_date.strftime("%Y%m%d")
-    start_str = get_start_date_n_trading_days_ago(days)
     
-    result = get_aggregated_top_stocks(start_str, end_str, investor_map[investor])
+    result = stock_service.get_aggregated_top_stocks(start_str, end_str, investor_map[investor])
     if result is None:
         raise HTTPException(status_code=404, detail="No data found for this period")
         
@@ -93,7 +115,10 @@ def get_daily_data(date: str, investor: str):
     if investor not in investor_map:
         raise HTTPException(status_code=400, detail="Invalid investor type")
 
-    result = get_top_net_buy_sell(date, investor_map[investor])
+    if startup_error:
+        raise HTTPException(status_code=500, detail=f"Server startup error: {startup_error}")
+
+    result = stock_service.get_top_net_buy_sell(date, investor_map[investor])
     if result is None:
         raise HTTPException(status_code=404, detail="No data found for this date")
     
@@ -128,7 +153,10 @@ def download_data(start_date: str, end_date: str, investors: Optional[List[str]]
                 inv_name = investor_map.get(inv_code)
                 if not inv_name: continue
                 
-                data = get_top_net_buy_sell(d, inv_name, allow_fallback=False)
+                # Check service availability
+                if not stock_service: break
+                
+                data = stock_service.get_top_net_buy_sell(d, inv_name, allow_fallback=False)
                 if data:
                     # Create Net Buy CSV
                     buy_df = pd.DataFrame(data['buy'])
