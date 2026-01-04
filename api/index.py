@@ -12,6 +12,31 @@ from datetime import datetime, timedelta
 # Initialize app FIRST to ensure it exists even if imports fail
 app = FastAPI()
 
+# Database Init
+from api.database import engine, Base
+import api.models # Import models to register them with Base
+Base.metadata.create_all(bind=engine)
+
+# Scheduler Init
+from apscheduler.schedulers.background import BackgroundScheduler
+from api.jobs import update_daily_data
+from contextlib import asynccontextmanager
+
+scheduler = BackgroundScheduler()
+
+# Schedule job to run at midnight (00:00)
+scheduler.add_job(update_daily_data, 'cron', hour=0, minute=0)
+
+@app.on_event("startup")
+def start_scheduler():
+    scheduler.start()
+    print("Scheduler started. Daily update job scheduled for 00:00.")
+
+@app.on_event("shutdown")
+def shutdown_scheduler():
+    scheduler.shutdown()
+
+
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

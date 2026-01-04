@@ -2,22 +2,130 @@ import pandas as pd
 from pykrx import stock
 from datetime import datetime, timedelta
 
+import os
+
+# Database cache handling
+from api.database import SessionLocal
+from api.models import StockData
+from sqlalchemy.orm import Session
+
 def get_investor_data(date, investor_type):
     """
     Fetches the raw net purchase dataframe for a specific investor type on a given date.
+    Checks Local DB -> fetch from pykrx -> save to DB
     Args:
         date (str): YYYYMMDD format
         investor_type (str): '외국인', '개인', '기관합계'
     """
+    db: Session = SessionLocal()
     try:
-        # get_market_net_purchases_of_equities_by_ticker(fromdate, todate, market, investor)
-        df = stock.get_market_net_purchases_of_equities_by_ticker(date, date, "ALL", investor_type)
-        if df.empty:
-            return pd.DataFrame()
-        return df
-    except Exception as e:
-        print(f"Error fetching data: {e}")
+        # 1. Check DB first
+        cached_data = db.query(StockData).filter(
+            StockData.date == date, 
+            StockData.investor == investor_type
+        ).all()
+        
+        if cached_data:
+            print(f"Using cached data from DB for {date} {investor_type} ({len(cached_data)} records)")
+            # Convert to DataFrame
+            data = [{
+                '티커': item.ticker,
+                '종목명': item.name,
+                '순매수거래대금': item.net_buy_amount
+            } for item in cached_data]
+            
+            df = pd.DataFrame(data)
+            df.set_index('티커', inplace=True)
+            return df
+            
+        # 2. Fetch from pykrx if not in DB
+        print(f"Fetching from pykrx for {date} {investor_type}...")
+        try:
+             # get_market_net_purchases_of_equities_by_ticker(fromdate, todate, market, investor)
+            df = stock.get_market_net_purchases_of_equities_by_ticker(date, date, "ALL", investor_type)
+            if not df.empty:
+                # Save to DB
+                print(f"Saving {len(df)} records to DB...")
+                new_records = []
+                for ticker, row in df.iterrows():
+                    # Check if relevant (maybe only save if non-zero? No, save all to be complete cache)
+                    # But for performance and storage, maybe Top N? User wants "pykrx data" to be cached.
+                    # Pykrx returns ALL tickers. That's approx 2500 rows.
+                    # SQLite can handle it easily.
+                    
+                    obj = StockData(
+                        date=date,
+                        investor=investor_type,
+                        ticker=str(ticker),
+                        name=row['종목명'],
+                        net_buy_amount=int(row['순매수거래대금'])
+                    )
+                    new_records.append(obj)
+                
+                # Bulk insert
+                db.bulk_save_objects(new_records)
+                db.commit()
+                
+                return df
+                
+        except Exception as e:
+            print(f"Error fetching data from pykrx: {e}")
+
+    finally:
+        db.close()
+
+    # 3. Fallback: Try loading from local CSVs
+    print(f"Attempting fallback to local CSV for {date}, {investor_type}")
+    
+    investor_code_map = {
+        "외국인": "foreigner",
+        "개인": "individual",
+        "기관합계": "institution"
+    }
+    
+    inv_code = investor_code_map.get(investor_type)
+    if not inv_code:
         return pd.DataFrame()
+        
+    # We look for files in the project root (parent of api/services/../../)
+    # Just assume current working dir is project root or check relative paths
+    # The app is running from project root usually.
+    
+    buy_file = f"{inv_code}_net_buy_top100_{date}.csv"
+    sell_file = f"{inv_code}_net_sell_top100_{date}.csv"
+    
+    combined_df = pd.DataFrame()
+    
+    if os.path.exists(buy_file):
+        try:
+            buy_df = pd.read_csv(buy_file)
+            # CSV columns: 티커, 종목명, 순매수거래대금
+            # We want Ticker as index
+            if '티커' in buy_df.columns:
+                # Ensure ticker is string (e.g. 005930, not 5930)
+                buy_df['티커'] = buy_df['티커'].astype(str).str.zfill(6)
+                buy_df.set_index('티커', inplace=True)
+                combined_df = pd.concat([combined_df, buy_df])
+        except Exception as e:
+            print(f"Error reading buy csv {buy_file}: {e}")
+
+    if os.path.exists(sell_file):
+        try:
+            sell_df = pd.read_csv(sell_file)
+            if '티커' in sell_df.columns:
+                sell_df['티커'] = sell_df['티커'].astype(str).str.zfill(6)
+                sell_df.set_index('티커', inplace=True)
+                combined_df = pd.concat([combined_df, sell_df])
+        except Exception as e:
+             print(f"Error reading sell csv {sell_file}: {e}")
+             
+    if not combined_df.empty:
+        # Remove duplicates if any (though buy/sell sets should be disjoint ideally)
+        combined_df = combined_df[~combined_df.index.duplicated(keep='first')]
+        print(f"Loaded {len(combined_df)} records from CSV for {date}")
+        return combined_df
+
+    return pd.DataFrame()
 
 def get_start_date_n_trading_days_ago(days):
     """
